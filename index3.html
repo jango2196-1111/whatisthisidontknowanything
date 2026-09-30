@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CSV 위치 데이터 지도 시각화</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Leaflet CSS & JS (Lightweight, Cross-Origin Safe Map Engine) -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+    
+    <!-- PapaParse for CSV parsing -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f5f9;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+        
+        /* Custom Leaflet Popup Styling */
+        .leaflet-popup-content-wrapper {
+            padding: 4px;
+            border-radius: 12px;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            border: 1px solid #e2e8f0;
+        }
+        .leaflet-popup-tip {
+            background: white;
+        }
+        .leaflet-container {
+            font-family: inherit;
+        }
+        /* Custom DivIcon Marker Styling */
+        .custom-map-pin {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: transform 0.2s ease-in-out;
+        }
+        .custom-map-pin:hover {
+            transform: scale(1.25);
+            z-index: 9999 !important;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans h-screen flex flex-col overflow-hidden">
+
+    <header class="bg-slate-900 text-white px-5 py-3 flex justify-between items-center shadow-md z-10 flex-shrink-0">
+        <div class="flex items-center space-x-3">
+            <div class="p-2 bg-blue-600 rounded-xl shadow-inner">
+                <i class="fa-solid fa-map-location-dot text-xl text-white"></i>
+            </div>
+            <div>
+                <h1 class="text-base font-bold leading-tight flex items-center gap-2">
+                    CSV 위치 데이터 지도 시각화
+                    <span class="bg-emerald-500/20 text-emerald-300 text-[10px] px-2 py-0.5 rounded-full border border-emerald-400/30">안정화 모드</span>
+                </h1>
+                <p class="text-xs text-slate-400">위도/경도가 포함된 CSV 데이터를 업로드하여 지도에 시각화하세요</p>
+            </div>
+        </div>
+        
+        <div class="flex items-center space-x-2">
+            <!-- Sample Data Selector Dropdown -->
+            <div class="relative group">
+                <button id="sample-dropdown-btn" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-amber-300 text-xs font-medium rounded-lg transition-all flex items-center space-x-1.5">
+                    <i class="fa-solid fa-flask"></i>
+                    <span>예시 데이터 불러오기</span>
+                    <i class="fa-solid fa-chevron-down text-[10px] opacity-70 ml-1"></i>
+                </button>
+                <div class="absolute right-0 mt-1 w-56 bg-white text-slate-800 rounded-xl shadow-xl border border-slate-200 hidden group-hover:block z-50 p-1">
+                    <button id="load-sample-jeju-btn" class="w-full text-left px-3 py-2 text-xs hover:bg-blue-50 rounded-lg flex items-center space-x-2 transition-colors">
+                        <i class="fa-solid fa-restroom text-blue-600"></i>
+                        <span>제주시 공중화장실 현황</span>
+                    </button>
+                    <button id="load-sample-geoje-btn" class="w-full text-left px-3 py-2 text-xs hover:bg-amber-50 rounded-lg flex items-center space-x-2 transition-colors">
+                        <i class="fa-solid fa-solar-panel text-amber-600"></i>
+                        <span>거제시 태양광 발전소 현황</span>
+                    </button>
+                </div>
+            </div>
+            
+            <button id="reset-btn" class="px-3 py-1.5 bg-slate-800 hover:bg-rose-900/40 hover:text-rose-300 border border-slate-700 text-slate-300 text-xs font-medium rounded-lg transition-all flex items-center space-x-1">
+                <i class="fa-solid fa-rotate-right"></i>
+                <span>초기화</span>
+            </button>
+        </div>
+    </header>
+
+    <div class="flex-1 flex overflow-hidden">
+        
+        <!-- Left Sidebar / Data Panel -->
+        <aside class="w-96 bg-white border-r border-slate-200 flex flex-col flex-shrink-0 shadow-sm z-10">
+            
+            <!-- File Upload Area -->
+            <div class="p-4 border-b border-slate-200 bg-slate-50/70">
+                <label class="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">1. CSV 파일 업로드</label>
+                
+                <div id="drop-zone" class="border-2 border-dashed border-slate-300 hover:border-blue-500 bg-white rounded-xl p-4 text-center cursor-pointer transition-all group shadow-sm">
+                    <input type="file" id="csv-file-input" accept=".csv, .txt" class="hidden" />
+                    <div class="w-10 h-10 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-2 group-hover:scale-110 transition-transform">
+                        <i class="fa-solid fa-cloud-arrow-up text-lg"></i>
+                    </div>
+                    <p class="text-xs font-medium text-slate-700 group-hover:text-blue-600 transition-colors">
+                        클릭하거나 CSV 파일을 여기에 드롭하세요
+                    </p>
+                    <p class="text-[11px] text-slate-400 mt-1">지원 형식: UTF-8, EUC-KR / CP949 CSV</p>
+                </div>
+
+                <!-- Encoding Selector -->
+                <div class="mt-3 flex items-center justify-between text-xs">
+                    <span class="text-slate-500 font-medium">인코딩 설정:</span>
+                    <select id="encoding-select" class="bg-white border border-slate-300 text-slate-700 rounded-lg px-2.5 py-1 focus:ring-2 focus:ring-blue-500 outline-none text-xs">
+                        <option value="EUC-KR" selected>EUC-KR / CP949 (한글 공공데이터)</option>
+                        <option value="UTF-8">UTF-8</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Column Selection Panel -->
+            <div id="column-config-panel" class="p-4 border-b border-slate-200 bg-blue-50/40 hidden">
+                <div class="flex items-center justify-between mb-2">
+                    <label class="text-xs font-semibold uppercase tracking-wider text-slate-600">2. 좌표 칼럼 매핑</label>
+                    <span class="text-[10px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-semibold" id="auto-detect-badge">자동 감지됨</span>
+                </div>
+                
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-[11px] font-medium text-slate-600 mb-1">위도 (Latitude)</label>
+                        <select id="lat-col-select" class="w-full bg-white border border-slate-300 text-xs rounded-lg px-2 py-1.5 focus:ring-2 focus:ring-blue-500 outline-none">
+                            <option value="">-- 선택 --</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-[11px] font-medium text-slate-600 mb-1">경도 (Longitude)</label>
+                        <select id="lng-col-select" class="w-full bg-white border border-slate-300 text-xs rounded-lg px-2 py-1.5 focus:ring-2 focus:ring-blue-500 outline-none">
+                            <option value="">-- 선택 --</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Stats Bar -->
+            <div id="stats-panel" class="px-4 py-2.5 border-b border-slate-200 bg-white grid grid-cols-3 gap-2 text-center text-xs">
+                <div class="bg-slate-50 p-2 rounded-lg border border-slate-100">
+                    <span class="block text-[10px] text-slate-400 font-medium">전체 행 수</span>
+                    <span id="stat-total" class="font-bold text-slate-800 text-sm">0</span>
+                </div>
+                <div class="bg-emerald-50 p-2 rounded-lg border border-emerald-100">
+                    <span class="block text-[10px] text-emerald-600 font-medium">지도 표시</span>
+                    <span id="stat-mapped" class="font-bold text-emerald-700 text-sm">0</span>
+                </div>
+                <div class="bg-rose-50 p-2 rounded-lg border border-rose-100">
+                    <span class="block text-[10px] text-rose-600 font-medium">좌표 누락</span>
+                    <span id="stat-invalid" class="font-bold text-rose-700 text-sm">0</span>
+                </div>
+            </div>
+
+            <!-- Search Filter -->
+            <div class="p-3 border-b border-slate-200 bg-white">
+                <div class="relative">
+                    <i class="fa-solid fa-magnifying-glass absolute left-3 top-2.5 text-slate-400 text-xs"></i>
+                    <input type="text" id="search-input" placeholder="목록에서 검색 (이름, 주소 등)..." class="w-full pl-8 pr-3 py-1.5 bg-slate-100 border border-slate-200 rounded-lg text-xs focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all">
+                </div>
+            </div>
+
+            <!-- Data List Container -->
+            <div class="flex-1 overflow-y-auto p-3 space-y-2 bg-slate-50/50" id="data-list-container">
+                <div id="empty-state" class="h-full flex flex-col items-center justify-center text-center p-6 text-slate-400">
+                    <div class="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center mb-3">
+                        <i class="fa-regular fa-folder-open text-2xl text-slate-300"></i>
+                    </div>
+                    <p class="text-sm font-medium text-slate-600 mb-1">업로드된 파일이 없습니다</p>
+                    <p class="text-xs text-slate-400 max-w-xs leading-relaxed">
+                        상단의 <b>[예시 데이터 불러오기]</b> 메뉴를 클릭하거나 CSV 파일을 업로드해 보세요.
+                    </p>
+                </div>
+                <div id="data-list" class="space-y-2 hidden"></div>
+            </div>
+
+            <!-- Footer info -->
+            <div class="p-3 border-t border-slate-200 bg-white text-xs flex items-center justify-between text-slate-500">
+                <span id="file-name-display" class="truncate font-medium text-slate-600">선택된 파일 없음</span>
+                <span class="text-[10px] bg-slate-100 px-2 py-0.5 rounded text-slate-400">Leaflet + Esri Map</span>
+            </div>
+        </aside>
+
+        <!-- Right Main Content: Map Viewport -->
+        <main class="flex-1 relative">
+            <div id="map" class="w-full h-full bg-slate-200 z-0"></div>
+
+            <!-- Map Layer Switcher Floating Menu -->
+            <div class="absolute top-4 right-4 z-[500] bg-white/90 backdrop-blur-md rounded-xl shadow-md border border-slate-200/80 p-1 flex space-x-1 text-xs">
+                <button id="tile-street" class="px-3 py-1.5 rounded-lg font-medium bg-blue-600 text-white transition-all shadow-sm">기본 지도</button>
+                <button id="tile-topo" class="px-3 py-1.5 rounded-lg font-medium text-slate-700 hover:bg-slate-100 transition-all">지형도</button>
+                <button id="tile-imagery" class="px-3 py-1.5 rounded-lg font-medium text-slate-700 hover:bg-slate-100 transition-all">위성 지도</button>
+                <button id="tile-gray" class="px-3 py-1.5 rounded-lg font-medium text-slate-700 hover:bg-slate-100 transition-all">심플 모드</button>
+            </div>
+
+            <!-- Notification Toast Message -->
+            <div id="toast" class="absolute bottom-6 left-1/2 -translate-x-1/2 z-[1000] bg-slate-900 text-white px-4 py-2.5 rounded-xl shadow-xl text-xs font-medium transition-all duration-300 opacity-0 transform translate-y-4 pointer-events-none flex items-center space-x-2 border border-slate-800">
+                <i id="toast-icon" class="fa-solid fa-circle-info text-blue-400"></i>
+                <span id="toast-msg">메시지 내용</span>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        let map;
+        let activeTileLayer;
+        let markerGroup;
+        
+        let parsedRows = [];
+        let validDataPoints = [];
+        let columnHeaders = [];
+        let latColName = '';
+        let lngColName = '';
+        let activeIndex = null;
+        let markerMap = new Map();
+
+        // 100% Free, Reliable, No-Key Esri ArcGIS Basemap Tiles (Cross-Origin Frame Safe)
+        const tileProviders = {
+            street: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+                maxZoom: 19,
+                attribution: 'Tiles &copy; Esri &mdash; Source: Esri, DeLorme, NAVTEQ, USGS, Intermap, iPC, NRCAN, Esri Japan, METI, Esri China (Hong Kong), Esri (Thailand), TomTom, 2012'
+            }),
+            topo: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', {
+                maxZoom: 19,
+                attribution: 'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ, TomTom, Intermap, iPC, USGS, FAO, NPS, NRCAN, GeoBase, IGN, Kadaster NL, Ordnance Survey, Esri Japan, METI, Esri China (Hong Kong), swisstopo, MapmyIndia, &copy; OpenStreetMap contributors, and the GIS User Community'
+            }),
+            imagery: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                maxZoom: 19,
+                attribution: 'Tiles &copy; Esri &mdash; Source: Esri, DigitalGlobe, GeoEye, Earthstar Geographics, CNES/Airbus DS, USDA, USGS, AeroGRID, IGN, and the GIS User Community'
+            }),
+            gray: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+                maxZoom: 16,
+                attribution: 'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ, HERE, MapmyIndia, Garmin, NGA, USGS'
+            })
+        };
+
+        window.addEventListener('DOMContentLoaded', () => {
+            initMap();
+            setupEventListeners();
+        });
+
+        function initMap() {
+            // Initialize Leaflet map centered over South Korea
+            map = L.map('map', {
+                zoomControl: false
+            }).setView([35.8, 127.8], 7);
+
+            // Add zoom control top-left
+            L.control.zoom({ position: 'topleft' }).addTo(map);
+
+            // Set initial basemap
+            activeTileLayer = tileProviders.street;
+            activeTileLayer.addTo(map);
+
+            // Initialize FeatureGroup for point markers
+            markerGroup = L.featureGroup().addTo(map);
+        }
+
+        function setupEventListeners() {
+            const dropZone = document.getElementById('drop-zone');
+            const fileInput = document.getElementById('csv-file-input');
+
+            dropZone.addEventListener('click', () => fileInput.click());
+
+            dropZone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                dropZone.classList.add('border-blue-500', 'bg-blue-50/60');
+            });
+
+            dropZone.addEventListener('dragleave', () => {
+                dropZone.classList.remove('border-blue-500', 'bg-blue-50/60');
+            });
+
+            dropZone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                dropZone.classList.remove('border-blue-500', 'bg-blue-50/60');
+                if (e.dataTransfer.files.length > 0) {
+                    handleFileSelect(e.dataTransfer.files[0]);
+                }
+            });
+
+            fileInput.addEventListener('change', (e) => {
+                if (e.target.files.length > 0) {
+                    handleFileSelect(e.target.files[0]);
+                }
+            });
+
+            // Column dropdown manual selection
+            document.getElementById('lat-col-select').addEventListener('change', (e) => {
+                latColName = e.target.value;
+                document.getElementById('auto-detect-badge').innerText = '수동 설정';
+                processParsedData();
+            });
+
+            document.getElementById('lng-col-select').addEventListener('change', (e) => {
+                lngColName = e.target.value;
+                document.getElementById('auto-detect-badge').innerText = '수동 설정';
+                processParsedData();
+            });
+
+            // Search filter input
+            document.getElementById('search-input').addEventListener('input', (e) => {
+                filterDataList(e.target.value);
+            });
+
+            // Map style buttons
+            document.getElementById('tile-street').addEventListener('click', (e) => switchMapStyle('street', e.target));
+            document.getElementById('tile-topo').addEventListener('click', (e) => switchMapStyle('topo', e.target));
+            document.getElementById('tile-imagery').addEventListener('click', (e) => switchMapStyle('imagery', e.target));
+            document.getElementById('tile-gray').addEventListener('click', (e) => switchMapStyle('gray', e.target));
+
+            // Load sample datasets
+            document.getElementById('load-sample-jeju-btn').addEventListener('click', loadSampleJejuData);
+            document.getElementById('load-sample-geoje-btn').addEventListener('click', loadSampleGeojeData);
+
+            // Reset button
+            document.getElementById('reset-btn').addEventListener('click', resetAll);
+        }
+
+        function handleFileSelect(file) {
+            const encoding = document.getElementById('encoding-select').value;
+            document.getElementById('file-name-display').innerText = file.name;
+
+            showToast(`'${file.name}' 파싱 중...`, 'info');
+
+            const reader = new FileReader();
+            reader.onload = function (e) {
+                parseCSVText(e.target.result);
+            };
+
+            reader.onerror = function () {
+                showToast('파일을 읽는데 실패했습니다.', 'error');
+            };
+
+            reader.readAsText(file, encoding);
+        }
+
+        function parseCSVText(csvContent) {
+            Papa.parse(csvContent, {
+                header: true,
+                skipEmptyLines: true,
+                dynamicTyping: false,
+                complete: function (results) {
+                    if (!results.data || results.data.length === 0) {
+                        showToast('CSV 데이터가 없거나 올바르지 않은 형식입니다.', 'error');
+                        return;
+                    }
+
+                    parsedRows = results.data;
+                    columnHeaders = results.meta.fields || Object.keys(parsedRows[0] || {});
+
+                    autoDetectCoordinatesColumns();
+                    populateColumnSelectors();
+                    processParsedData();
+
+                    showToast(`${parsedRows.length}개의 데이터 행이 로드되었습니다.`, 'success');
+                },
+                error: function (err) {
+                    showToast('CSV 파싱 오류: ' + err.message, 'error');
+                }
+            });
+        }
+
+        function autoDetectCoordinatesColumns() {
+            const latRegex = /^(위도|latitude|lat|y|y좌표|y_crd|y_coord)$/i;
+            const lngRegex = /^(경도|longitude|lng|lon|x|x좌표|x_crd|x_coord)$/i;
+
+            latColName = columnHeaders.find(h => latRegex.test(h.trim())) || '';
+            lngColName = columnHeaders.find(h => lngRegex.test(h.trim())) || '';
+
+            if (!latColName) {
+                latColName = columnHeaders.find(h => h.includes('위도') || h.toLowerCase().includes('lat')) || '';
+            }
+            if (!lngColName) {
+                lngColName = columnHeaders.find(h => h.includes('경도') || h.toLowerCase().includes('lng') || h.toLowerCase().includes('lon')) || '';
+            }
+
+            const badge = document.getElementById('auto-detect-badge');
+            if (latColName && lngColName) {
+                badge.innerText = '자동 감지됨';
+                badge.className = 'text-[10px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-semibold';
+            } else {
+                badge.innerText = '선택 필요';
+                badge.className = 'text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-semibold';
+            }
+        }
+
+        function populateColumnSelectors() {
+            const latSelect = document.getElementById('lat-col-select');
+            const lngSelect = document.getElementById('lng-col-select');
+            const configPanel = document.getElementById('column-config-panel');
+
+            configPanel.classList.remove('hidden');
+
+            latSelect.innerHTML = '<option value="">-- 선택 --</option>';
+            lngSelect.innerHTML = '<option value="">-- 선택 --</option>';
+
+            columnHeaders.forEach(col => {
+                const opt1 = document.createElement('option');
+                opt1.value = col;
+                opt1.textContent = col;
+                if (col === latColName) opt1.selected = true;
+                latSelect.appendChild(opt1);
+
+                const opt2 = document.createElement('option');
+                opt2.value = col;
+                opt2.textContent = col;
+                if (col === lngColName) opt2.selected = true;
+                lngSelect.appendChild(opt2);
+            });
+        }
+
+        function processParsedData() {
+            validDataPoints = [];
+            let invalidCount = 0;
+
+            if (!latColName || !lngColName) {
+                showToast('위도 및 경도 칼럼을 선택해 주세요.', 'info');
+                updateStats(parsedRows.length, 0, parsedRows.length);
+                renderDataList([]);
+                clearMarkers();
+                return;
+            }
+
+            parsedRows.forEach((row, idx) => {
+                const rawLat = row[latColName];
+                const rawLng = row[lngColName];
+
+                const lat = parseFloat(String(rawLat).replace(/[^0-9.-]/g, ''));
+                const lng = parseFloat(String(rawLng).replace(/[^0-9.-]/g, ''));
+
+                if (!isNaN(lat) && !isNaN(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180 && lat !== 0 && lng !== 0) {
+                    validDataPoints.push({
+                        id: idx,
+                        lat: lat,
+                        lng: lng,
+                        data: row
+                    });
+                } else {
+                    invalidCount++;
+                }
+            });
+
+            updateStats(parsedRows.length, validDataPoints.length, invalidCount);
+            renderDataList(validDataPoints);
+            renderMarkersOnMap();
+        }
+
+        function updateStats(total, mapped, invalid) {
+            document.getElementById('stat-total').innerText = total.toLocaleString();
+            document.getElementById('stat-mapped').innerText = mapped.toLocaleString();
+            document.getElementById('stat-invalid').innerText = invalid.toLocaleString();
+        }
+
+        function clearMarkers() {
+            markerGroup.clearLayers();
+            markerMap.clear();
+        }
+
+        function renderMarkersOnMap() {
+            clearMarkers();
+
+            if (validDataPoints.length === 0) return;
+
+            validDataPoints.forEach(pt => {
+                // Custom Leaflet DivIcon with FontAwesome marker pin
+                const customIcon = L.divIcon({
+                    className: 'custom-map-pin',
+                    html: `
+                        <div class="w-7 h-7 bg-blue-600 hover:bg-amber-500 border-2 border-white rounded-full flex items-center justify-center text-white shadow-lg cursor-pointer">
+                            <i class="fa-solid fa-location-dot text-xs"></i>
+                        </div>
+                    `,
+                    iconSize: [28, 28],
+                    iconAnchor: [14, 14],
+                    popupAnchor: [0, -14]
+                });
+
+                const popupHTML = createPopupHTML(pt.data, pt.lat, pt.lng);
+
+                const marker = L.marker([pt.lat, pt.lng], { icon: customIcon })
+                    .bindPopup(popupHTML, { maxWidth: 320 })
+                    .addTo(markerGroup);
+
+                marker.on('click', () => {
+                    highlightListItem(pt.id);
+                });
+
+                markerMap.set(pt.id, marker);
+            });
+
+            // Fit map bounds to show all markers smoothly
+            if (validDataPoints.length > 0) {
+                const bounds = markerGroup.getBounds();
+                if (bounds.isValid()) {
+                    map.fitBounds(bounds, { padding: [50, 50], maxZoom: 15 });
+                }
+            }
+        }
+
+        function getRowDisplayName(row) {
+            const priorityKeys = ['화장실명', '발전소명', '사업자명', '상호', '명칭', '이름', '시설명', '주소', '소재지도로명주소', '소재지지번주소'];
+            for (const key of priorityKeys) {
+                if (row[key]) return row[key];
+            }
+            for (const key in row) {
+                if (row[key] && key !== latColName && key !== lngColName) return row[key];
+            }
+            return '위치 데이터';
+        }
+
+        function createPopupHTML(row, lat, lng) {
+            let title = getRowDisplayName(row);
+            let rowsHtml = '';
+
+            for (const [key, val] of Object.entries(row)) {
+                if (val !== null && val !== undefined && val !== '') {
+                    const isCoord = (key === latColName || key === lngColName);
+                    rowsHtml += `
+                        <tr class="${isCoord ? 'bg-blue-50/80 font-medium' : 'border-b border-slate-100'} text-xs">
+                            <td class="py-1 px-2 text-slate-500 whitespace-nowrap font-medium">${escapeHtml(key)}</td>
+                            <td class="py-1 px-2 text-slate-800 break-all">${escapeHtml(String(val))}</td>
+                        </tr>
+                    `;
+                }
+            }
+
+            return `
+                <div class="p-1 font-sans">
+                    <div class="border-b border-slate-200 pb-2 mb-2 flex items-center justify-between">
+                        <h3 class="font-bold text-sm text-slate-900 truncate pr-2">${escapeHtml(title)}</h3>
+                        <span class="text-[10px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded font-semibold shrink-0">
+                            <i class="fa-solid fa-location-dot mr-1"></i>상세 정보
+                        </span>
+                    </div>
+                    <div class="max-h-52 overflow-y-auto pr-1">
+                        <table class="w-full text-left border-collapse">
+                            <tbody>
+                                ${rowsHtml}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderDataList(points) {
+            const listEl = document.getElementById('data-list');
+            const emptyState = document.getElementById('empty-state');
+
+            if (points.length === 0) {
+                listEl.classList.add('hidden');
+                emptyState.classList.remove('hidden');
+                return;
+            }
+
+            emptyState.classList.add('hidden');
+            listEl.classList.remove('hidden');
+            listEl.innerHTML = '';
+
+            points.forEach(pt => {
+                const title = getRowDisplayName(pt.data);
+                const subDetail = pt.data['소재지도로명주소'] || pt.data['소재지지번주소'] || pt.data['주소'] || pt.data['소재지'] || pt.data['개방시간'] || '';
+
+                const card = document.createElement('div');
+                card.id = `data-card-${pt.id}`;
+                card.className = `p-3 bg-white border border-slate-200 hover:border-blue-400 rounded-xl cursor-pointer transition-all hover:shadow-sm text-xs group`;
+                
+                card.innerHTML = `
+                    <div class="flex items-start justify-between">
+                        <div class="font-semibold text-slate-800 group-hover:text-blue-600 transition-colors truncate pr-2">
+                            ${escapeHtml(title)}
+                        </div>
+                        <span class="text-[10px] text-slate-400 font-mono shrink-0">#${pt.id + 1}</span>
+                    </div>
+                    ${subDetail ? `<div class="text-[11px] text-slate-500 mt-1 truncate">${escapeHtml(subDetail)}</div>` : ''}
+                    <div class="mt-2 flex items-center text-[10px] text-slate-400 space-x-3 font-mono">
+                        <span><i class="fa-solid fa-arrows-up-down text-slate-300 mr-1"></i>${pt.lat.toFixed(5)}</span>
+                        <span><i class="fa-solid fa-arrows-left-right text-slate-300 mr-1"></i>${pt.lng.toFixed(5)}</span>
+                    </div>
+                `;
+
+                card.addEventListener('click', () => {
+                    flyToLocation(pt.id, pt.lat, pt.lng);
+                });
+
+                listEl.appendChild(card);
+            });
+        }
+
+        function filterDataList(query) {
+            if (!query.trim()) {
+                renderDataList(validDataPoints);
+                return;
+            }
+
+            const q = query.toLowerCase();
+            const filtered = validDataPoints.filter(pt => {
+                return Object.values(pt.data).some(val => 
+                    val && String(val).toLowerCase().includes(q)
+                );
+            });
+
+            renderDataList(filtered);
+        }
+
+        function flyToLocation(id, lat, lng) {
+            highlightListItem(id);
+
+            map.flyTo([lat, lng], 15, { duration: 1.2 });
+
+            const marker = markerMap.get(id);
+            if (marker) {
+                setTimeout(() => {
+                    marker.openPopup();
+                }, 400);
+            }
+        }
+
+        function highlightListItem(id) {
+            if (activeIndex !== null) {
+                const prev = document.getElementById(`data-card-${activeIndex}`);
+                if (prev) {
+                    prev.classList.remove('border-blue-600', 'bg-blue-50/50', 'ring-2', 'ring-blue-400/30');
+                    prev.classList.add('border-slate-200', 'bg-white');
+                }
+            }
+
+            activeIndex = id;
+            const current = document.getElementById(`data-card-${id}`);
+            if (current) {
+                current.classList.remove('border-slate-200', 'bg-white');
+                current.classList.add('border-blue-600', 'bg-blue-50/50', 'ring-2', 'ring-blue-400/30');
+                current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+        }
+
+        function loadSampleJejuData() {
+            const sampleCSV = `연번,화장실명,소재지도로명주소,소재지지번주소,남녀공용화장실여부,남성용-대변기수,여성용-대변기수,관리기관명,전화번호,개방시간,위도,경도
+1,도두항 공중화장실,제주특별자치도 제주시 도두항서길 41,제주특별자치도 제주시 도두일동 2632-1,N,2,3,제주시 도두동,064-728-4952,24시간,33.50854,126.47041
+2,용두암 공중화장실,제주특별자치도 제주시 용두암길 15,제주특별자치도 제주시 용담이동 2581,N,3,4,제주시 용담2동,064-728-4602,24시간,33.51631,126.51352
+3,탑동광장 공중화장실,제주특별자치도 제주시 탑동로 22,제주특별자치도 제주시 건입동 141,N,4,6,제주시 건입동,064-728-4652,24시간,33.51862,126.52521
+4,삼양해수욕장 화장실,제주특별자치도 제주시 선사로2길 20,제주특별자치도 제주시 삼양일동 1581,N,3,5,제주시 삼양동,064-728-4702,24시간,33.52531,126.58512
+5,함덕해수욕장 화장실,제주특별자치도 제주시 조천읍 함덕리 1008,제주특별자치도 제주시 조천읍 함덕리 1008,N,5,8,제주시 조천읍,064-728-7822,24시간,33.54321,126.66912
+6,협재해수욕장 화장실,제주특별자치도 제주시 한림읍 협재리 2497-1,제주특별자치도 제주시 한림읍 협재리 2497-1,N,4,7,제주시 한림읍,064-728-7622,24시간,33.39381,126.23951
+7,한라산 관음사 탐방로 화장실,제주특별자치도 제주시 산록북로 588,제주특별자치도 제주시 아라일동 3,N,2,3,제주시 아라동,064-728-4802,06:00~18:00,33.42341,126.54512
+8,애월한담산책로 화장실,제주특별자치도 제주시 애월읍 애월리 2467,제주특별자치도 제주시 애월읍 애월리 2467,N,3,4,제주시 애월읍,064-728-7722,24시간,33.46214,126.31054
+9,종달리 해변 화장실,제주특별자치도 제주시 구좌읍 종달리 610,제주특별자치도 제주시 구좌읍 종달리 610,N,2,3,제주시 구좌읍,064-728-7772,24시간,33.51204,126.89541
+10,관덕정 공중화장실,제주특별자치도 제주시 관덕로 25,제주특별자치도 제주시 삼도이동 983-1,N,2,3,제주시 삼도2동,064-728-4552,24시간,33.51311,126.52214`;
+
+            document.getElementById('file-name-display').innerText = '제주특별자치도 제주시_공중화장실_예시.csv';
+            document.getElementById('encoding-select').value = 'UTF-8';
+
+            parseCSVText(sampleCSV);
+            showToast('제주시 공중화장실 예시 데이터가 로드되었습니다!', 'success');
+        }
+
+        function loadSampleGeojeData() {
+            const sampleCSV = `연번,사업자명,발전소명,소재지,설비용량(kW),허가일자,위도,경도
+1,거제태양광발전,거제1호 태양광발전소,경상남도 거제시 일운면 지세포리 123-4,99.8,2021-03-15,34.83214,128.68541
+2,해돋이에너지,해돋이 태양광,경상남도 거제시 장목면 관포리 567-8,198.5,2021-06-20,34.98541,128.65412
+3,남해햇빛발전,거제 동부 태양광,경상남도 거제시 동부면 산양리 89-1,49.5,2022-01-10,34.82105,128.58412
+4,거제솔라,사등솔라 1호,경상남도 거제시 사등면 성내리 345,99.0,2022-04-18,34.88541,128.53214
+5,바다햇빛에너지,거제둔덕 태양광발전소,경상남도 거제시 둔덕면 하둔리 678,250.0,2022-08-05,34.85412,128.51204
+6,거제에코파워,연초에코 태양광,경상남도 거제시 연초면 죽토리 901,99.9,2023-02-14,34.91204,128.63541
+7,거제시민햇빛발전,하청 태양광 1호기,경상남도 거제시 하청면 하청리 234,498.0,2023-05-22,34.95412,128.62105
+8,청정에너지,거미봉 태양광,경상남도 거제시 능포동 12-3,99.0,2023-09-30,34.87854,128.72105
+9,거제그린솔라,거제 상문 태양광,경상남도 거제시 상문동 456-7,150.0,2024-01-11,34.86541,128.61204
+10,남부솔라파워,거제 남부 태양광,경상남도 거제시 남부면 갈곶리 789,98.0,2024-04-03,34.75412,128.63214`;
+
+            document.getElementById('file-name-display').innerText = '경상남도 거제시_태양광발전소_예시.csv';
+            document.getElementById('encoding-select').value = 'UTF-8';
+
+            parseCSVText(sampleCSV);
+            showToast('거제시 태양광 예시 데이터가 로드되었습니다!', 'success');
+        }
+
+        function switchMapStyle(styleKey, targetBtn) {
+            if (activeTileLayer) {
+                map.removeLayer(activeTileLayer);
+            }
+
+            activeTileLayer = tileProviders[styleKey];
+            activeTileLayer.addTo(map);
+
+            const buttons = [
+                document.getElementById('tile-street'),
+                document.getElementById('tile-topo'),
+                document.getElementById('tile-imagery'),
+                document.getElementById('tile-gray')
+            ];
+
+            buttons.forEach(btn => {
+                btn.className = 'px-3 py-1.5 rounded-lg font-medium text-slate-700 hover:bg-slate-100 transition-all';
+            });
+
+            targetBtn.className = 'px-3 py-1.5 rounded-lg font-medium bg-blue-600 text-white transition-all shadow-sm';
+        }
+
+        function resetAll() {
+            parsedRows = [];
+            validDataPoints = [];
+            columnHeaders = [];
+            latColName = '';
+            lngColName = '';
+            activeIndex = null;
+
+            document.getElementById('csv-file-input').value = '';
+            document.getElementById('file-name-display').innerText = '선택된 파일 없음';
+            document.getElementById('search-input').value = '';
+            document.getElementById('column-config-panel').classList.add('hidden');
+
+            updateStats(0, 0, 0);
+            renderDataList([]);
+            clearMarkers();
+
+            map.setView([35.8, 127.8], 7);
+
+            showToast('초기화되었습니다.', 'info');
+        }
+
+        function showToast(message, type = 'info') {
+            const toast = document.getElementById('toast');
+            const toastMsg = document.getElementById('toast-msg');
+            const toastIcon = document.getElementById('toast-icon');
+
+            toastMsg.innerText = message;
+
+            if (type === 'success') {
+                toastIcon.className = 'fa-solid fa-circle-check text-emerald-400';
+            } else if (type === 'error') {
+                toastIcon.className = 'fa-solid fa-triangle-exclamation text-rose-400';
+            } else {
+                toastIcon.className = 'fa-solid fa-circle-info text-blue-400';
+            }
+
+            toast.classList.remove('opacity-0', 'translate-y-4', 'pointer-events-none');
+            toast.classList.add('opacity-100', 'translate-y-0');
+
+            setTimeout(() => {
+                toast.classList.remove('opacity-100', 'translate-y-0');
+                toast.classList.add('opacity-0', 'translate-y-4', 'pointer-events-none');
+            }, 3000);
+        }
+
+        function escapeHtml(str) {
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+    </script>
+</body>
+</html>
