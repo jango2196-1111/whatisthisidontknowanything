@@ -1,0 +1,761 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CSV 위치 데이터 지도 시각화</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Leaflet Map CSS & JS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- Leaflet Marker Cluster Plugin -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+    <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+    <!-- PapaParse for CSV parsing -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        /* Custom scrollbar styling */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f5f9;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+        /* Leaflet map container fix */
+        #map {
+            z-index: 1;
+        }
+        .marker-cluster-small {
+            background-color: rgba(59, 130, 246, 0.6);
+        }
+        .marker-cluster-small div {
+            background-color: rgba(37, 99, 235, 0.85);
+            color: white;
+            font-weight: bold;
+        }
+        .marker-cluster-medium {
+            background-color: rgba(245, 158, 11, 0.6);
+        }
+        .marker-cluster-medium div {
+            background-color: rgba(217, 119, 6, 0.85);
+            color: white;
+            font-weight: bold;
+        }
+        .marker-cluster-large {
+            background-color: rgba(239, 68, 68, 0.6);
+        }
+        .marker-cluster-large div {
+            background-color: rgba(220, 38, 38, 0.85);
+            color: white;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans h-screen flex flex-col overflow-hidden">
+
+    <header class="bg-slate-900 text-white px-6 py-3 flex justify-between items-center shadow-md z-10 flex-shrink-0">
+        <div class="flex items-center space-x-3">
+            <div class="p-2 bg-blue-600 rounded-lg shadow">
+                <i class="fa-solid fa-map-location-dot text-xl text-white"></i>
+            </div>
+            <div>
+                <h1 class="text-lg font-bold leading-tight">CSV 위치 데이터 지도 시각화</h1>
+                <p class="text-xs text-slate-400">위도/경도 좌표가 포함된 CSV 데이터를 지도로 바로 확인하세요</p>
+            </div>
+        </div>
+        
+        <div class="flex items-center space-x-3">
+            <button id="load-sample-btn" class="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-sm font-medium rounded-lg transition-all flex items-center space-x-2">
+                <i class="fa-solid fa-solar-panel text-amber-400"></i>
+                <span>예시 데이터 불러오기 (거제시 태양광)</span>
+            </button>
+            
+            <button id="reset-btn" class="px-3 py-2 bg-slate-800 hover:bg-red-900/50 hover:text-red-300 border border-slate-700 text-slate-300 text-sm font-medium rounded-lg transition-all flex items-center space-x-1">
+                <i class="fa-solid fa-rotate-right"></i>
+                <span>초기화</span>
+            </button>
+        </div>
+    </header>
+
+    <div class="flex-1 flex overflow-hidden">
+        
+        <!-- Left Sidebar / Data Panel -->
+        <aside class="w-96 bg-white border-r border-slate-200 flex flex-col flex-shrink-0 shadow-sm z-10">
+            
+            <!-- File Upload Area -->
+            <div class="p-4 border-b border-slate-200 bg-slate-50">
+                <label class="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">1. CSV 파일 업로드</label>
+                
+                <div id="drop-zone" class="border-2 border-dashed border-slate-300 hover:border-blue-500 bg-white rounded-xl p-4 text-center cursor-pointer transition-colors group">
+                    <input type="file" id="csv-file-input" accept=".csv, .txt" class="hidden" />
+                    <div class="w-10 h-10 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-2 group-hover:scale-110 transition-transform">
+                        <i class="fa-solid fa-cloud-arrow-up text-lg"></i>
+                    </div>
+                    <p class="text-xs font-medium text-slate-700 group-hover:text-blue-600 transition-colors">
+                        클릭하거나 CSV 파일을 여기에 드롭하세요
+                    </p>
+                    <p class="text-[11px] text-slate-400 mt-1">지원 형식: UTF-8, EUC-KR / CP949 CSV</p>
+                </div>
+
+                <!-- Encoding Selector -->
+                <div class="mt-3 flex items-center justify-between text-xs">
+                    <span class="text-slate-500">인코딩 설정:</span>
+                    <select id="encoding-select" class="bg-white border border-slate-300 text-slate-700 rounded px-2 py-1 focus:ring-2 focus:ring-blue-500 outline-none">
+                        <option value="EUC-KR" selected>EUC-KR / CP949 (한글 공공데이터)</option>
+                        <option value="UTF-8">UTF-8</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Column Selection Panel (Hidden initially until CSV loaded) -->
+            <div id="column-config-panel" class="p-4 border-b border-slate-200 bg-blue-50/50 hidden">
+                <div class="flex items-center justify-between mb-2">
+                    <label class="text-xs font-semibold uppercase tracking-wider text-slate-600">2. 좌표 칼럼 매핑</label>
+                    <span class="text-[11px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium" id="auto-detect-badge">자동 감지됨</span>
+                </div>
+                
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-[11px] font-medium text-slate-600 mb-1">위도 (Latitude)</label>
+                        <select id="lat-col-select" class="w-full bg-white border border-slate-300 text-xs rounded-lg px-2 py-1.5 focus:ring-2 focus:ring-blue-500 outline-none">
+                            <option value="">-- 선택 --</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-[11px] font-medium text-slate-600 mb-1">경도 (Longitude)</label>
+                        <select id="lng-col-select" class="w-full bg-white border border-slate-300 text-xs rounded-lg px-2 py-1.5 focus:ring-2 focus:ring-blue-500 outline-none">
+                            <option value="">-- 선택 --</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Stats Bar -->
+            <div id="stats-panel" class="px-4 py-3 border-b border-slate-200 bg-white grid grid-cols-3 gap-2 text-center text-xs">
+                <div class="bg-slate-50 p-2 rounded-lg border border-slate-100">
+                    <span class="block text-[10px] text-slate-400 font-medium">전체 데이터</span>
+                    <span id="stat-total" class="font-bold text-slate-800 text-sm">0</span>
+                </div>
+                <div class="bg-emerald-50 p-2 rounded-lg border border-emerald-100">
+                    <span class="block text-[10px] text-emerald-600 font-medium">지도 표시</span>
+                    <span id="stat-mapped" class="font-bold text-emerald-700 text-sm">0</span>
+                </div>
+                <div class="bg-rose-50 p-2 rounded-lg border border-rose-100">
+                    <span class="block text-[10px] text-rose-600 font-medium">좌표 누락/오류</span>
+                    <span id="stat-invalid" class="font-bold text-rose-700 text-sm">0</span>
+                </div>
+            </div>
+
+            <!-- Search Filter -->
+            <div class="p-3 border-b border-slate-200 bg-white">
+                <div class="relative">
+                    <i class="fa-solid fa-magnifying-glass absolute left-3 top-2.5 text-slate-400 text-xs"></i>
+                    <input type="text" id="search-input" placeholder="데이터 내 검색 (사업자, 주소 등)..." class="w-full pl-8 pr-3 py-1.5 bg-slate-100 border border-slate-200 rounded-lg text-xs focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all">
+                </div>
+            </div>
+
+            <!-- Data List Container -->
+            <div class="flex-1 overflow-y-auto p-3 space-y-2 bg-slate-50/50" id="data-list-container">
+                <div id="empty-state" class="h-full flex flex-col items-center justify-center text-center p-6 text-slate-400">
+                    <i class="fa-regular fa-folder-open text-4xl mb-3 text-slate-300"></i>
+                    <p class="text-sm font-medium text-slate-600 mb-1">업로드된 파일이 없습니다</p>
+                    <p class="text-xs text-slate-400 max-w-xs">좌측 상단에서 CSV 파일(예: 거제시 태양광 발전소 현황)을 불러오거나 상단의 예시 데이터를 클릭하세요.</p>
+                </div>
+                <div id="data-list" class="space-y-2 hidden"></div>
+            </div>
+
+            <!-- Bottom Options Footer -->
+            <div class="p-3 border-t border-slate-200 bg-white text-xs flex items-center justify-between text-slate-500">
+                <label class="flex items-center space-x-2 cursor-pointer">
+                    <input type="checkbox" id="cluster-toggle" checked class="rounded text-blue-600 focus:ring-blue-500">
+                    <span>마커 그룹화 (클러스터링)</span>
+                </label>
+                <span id="file-name-display" class="truncate max-w-[120px] text-[11px] text-slate-400"></span>
+            </div>
+        </aside>
+
+        <!-- Right Main Content: Leaflet Map -->
+        <main class="flex-1 relative">
+            <div id="map" class="w-full h-full bg-slate-100"></div>
+
+            <!-- Map Layer Switcher Control -->
+            <div class="absolute top-4 right-4 z-[1000] bg-white rounded-lg shadow-md border border-slate-200 p-1 flex space-x-1 text-xs">
+                <button id="tile-carto" class="px-3 py-1.5 rounded font-medium bg-blue-50 text-blue-600 transition-colors">기본 지도</button>
+                <button id="tile-esri" class="px-3 py-1.5 rounded font-medium text-slate-600 hover:bg-slate-100 transition-colors">지형도 (Esri)</button>
+                <button id="tile-dark" class="px-3 py-1.5 rounded font-medium text-slate-600 hover:bg-slate-100 transition-colors">다크 모드</button>
+            </div>
+
+            <!-- Notification Toast Message -->
+            <div id="toast" class="absolute bottom-6 left-1/2 -translate-x-1/2 z-[1000] bg-slate-900 text-white px-4 py-2.5 rounded-xl shadow-lg text-xs font-medium transition-all duration-300 opacity-0 transform translate-y-4 pointer-events-none flex items-center space-x-2">
+                <i id="toast-icon" class="fa-solid fa-circle-info text-blue-400"></i>
+                <span id="toast-msg">메시지 내용</span>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        let map;
+        let markersGroup;
+        let clusterGroup;
+        let currentTileLayer;
+        
+        let parsedRows = [];
+        let validDataPoints = [];
+        let columnHeaders = [];
+        let latColName = '';
+        let lngColName = '';
+        let activeMarkerIndex = null;
+        let mapMarkersMap = new Map(); // Index -> Leaflet Marker mapping
+
+        // Tile layer URLs (API Key나 Referrer 제한이 없는 Esri ArcGIS 타일)
+        const tiles = {
+            carto: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+                maxZoom: 19,
+                attribution: 'Tiles &copy; Esri &mdash; Source: Esri, DeLorme, NAVTEQ, USGS, Intermap, iPC, NRCAN, Esri Japan, METI, Esri China (Hong Kong), Esri (Thailand), TomTom'
+            }),
+            esri: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', {
+                maxZoom: 19,
+                attribution: 'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ, TomTom, Intermap, iPC, USGS, FAO, NPS, NRCAN, GeoBase, Kadaster NL, Ordnance Survey, Esri Japan, METI, Esri China (Hong Kong), and the GIS User Community'
+            }),
+            dark: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+                maxZoom: 19,
+                attribution: 'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ, TomTom, Intermap, iPC, USGS, FAO, NPS, NRCAN, GeoBase, Kadaster NL, Ordnance Survey, Esri Japan, METI, Esri China (Hong Kong), and the GIS User Community'
+            })
+        };
+
+        window.addEventListener('DOMContentLoaded', () => {
+            initMap();
+            setupEventListeners();
+        });
+
+        function initMap() {
+            // Default center: South Korea
+            map = L.map('map', {
+                zoomControl: false
+            }).setView([36.5, 127.8], 7);
+
+            // Add standard zoom control at top-left
+            L.control.zoom({ position: 'topleft' }).addTo(map);
+
+            // Set initial tile layer (CARTO Voyager)
+            currentTileLayer = tiles.carto.addTo(map);
+
+            // Initialize marker layers
+            clusterGroup = L.markerClusterGroup({
+                chunkedLoading: true,
+                maxClusterRadius: 50,
+                spiderfyOnMaxZoom: true,
+                showCoverageOnHover: false
+            });
+            
+            markersGroup = L.layerGroup();
+            map.addLayer(clusterGroup);
+        }
+
+        function setupEventListeners() {
+            const dropZone = document.getElementById('drop-zone');
+            const fileInput = document.getElementById('csv-file-input');
+
+            dropZone.addEventListener('click', () => fileInput.click());
+
+            dropZone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                dropZone.classList.add('border-blue-500', 'bg-blue-50/50');
+            });
+
+            dropZone.addEventListener('dragleave', () => {
+                dropZone.classList.remove('border-blue-500', 'bg-blue-50/50');
+            });
+
+            dropZone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                dropZone.classList.remove('border-blue-500', 'bg-blue-50/50');
+                if (e.dataTransfer.files.length > 0) {
+                    handleFileSelect(e.dataTransfer.files[0]);
+                }
+            });
+
+            fileInput.addEventListener('change', (e) => {
+                if (e.target.files.length > 0) {
+                    handleFileSelect(e.target.files[0]);
+                }
+            });
+
+            // Column selects manual change
+            document.getElementById('lat-col-select').addEventListener('change', (e) => {
+                latColName = e.target.value;
+                document.getElementById('auto-detect-badge').innerText = '수동 설정';
+                processParsedData();
+            });
+
+            document.getElementById('lng-col-select').addEventListener('change', (e) => {
+                lngColName = e.target.value;
+                document.getElementById('auto-detect-badge').innerText = '수동 설정';
+                processParsedData();
+            });
+
+            // Search input filter
+            document.getElementById('search-input').addEventListener('input', (e) => {
+                filterDataList(e.target.value);
+            });
+
+            // Cluster Toggle
+            document.getElementById('cluster-toggle').addEventListener('change', (e) => {
+                renderMarkersOnMap(e.target.checked);
+            });
+
+            // Tile buttons
+            document.getElementById('tile-carto').addEventListener('click', (e) => switchTile('carto', e.target));
+            document.getElementById('tile-esri').addEventListener('click', (e) => switchTile('esri', e.target));
+            document.getElementById('tile-dark').addEventListener('click', (e) => switchTile('dark', e.target));
+
+            // Load sample dataset
+            document.getElementById('load-sample-btn').addEventListener('click', loadSampleData);
+
+            // Reset button
+            document.getElementById('reset-btn').addEventListener('click', resetAll);
+        }
+
+        function handleFileSelect(file) {
+            const encoding = document.getElementById('encoding-select').value;
+            document.getElementById('file-name-display').innerText = file.name;
+
+            showToast(`'${file.name}' 파일을 읽는 중...`, 'info');
+
+            const reader = new FileReader();
+            reader.onload = function (e) {
+                const text = e.target.result;
+                parseCSVText(text);
+            };
+
+            reader.onerror = function () {
+                showToast('파일을 읽는데 실패했습니다.', 'error');
+            };
+
+            reader.readAsText(file, encoding);
+        }
+
+        function parseCSVText(csvContent) {
+            Papa.parse(csvContent, {
+                header: true,
+                skipEmptyLines: true,
+                dynamicTyping: false,
+                complete: function (results) {
+                    if (!results.data || results.data.length === 0) {
+                        showToast('CSV 데이터가 없거나 올바르지 않은 형식입니다.', 'error');
+                        return;
+                    }
+
+                    parsedRows = results.data;
+                    columnHeaders = results.meta.fields || Object.keys(parsedRows[0] || {});
+
+                    autoDetectCoordinatesColumns();
+                    populateColumnSelectors();
+                    processParsedData();
+
+                    showToast(`${parsedRows.length}개의 행이 파싱되었습니다.`, 'success');
+                },
+                error: function (err) {
+                    showToast('CSV 파싱 오류: ' + err.message, 'error');
+                }
+            });
+        }
+
+        function autoDetectCoordinatesColumns() {
+            // Regex match patterns for Latitude (위도) and Longitude (경도)
+            const latRegex = /^(위도|latitude|lat|y|y좌표|y_crd|y_coord)$/i;
+            const lngRegex = /^(경도|longitude|lng|lon|x|x좌표|x_crd|x_coord)$/i;
+
+            latColName = columnHeaders.find(h => latRegex.test(h.trim())) || '';
+            lngColName = columnHeaders.find(h => lngRegex.test(h.trim())) || '';
+
+            // Secondary search if exact regex failed (partial match)
+            if (!latColName) {
+                latColName = columnHeaders.find(h => h.includes('위도') || h.toLowerCase().includes('lat')) || '';
+            }
+            if (!lngColName) {
+                lngColName = columnHeaders.find(h => h.includes('경도') || h.toLowerCase().includes('lng') || h.toLowerCase().includes('lon')) || '';
+            }
+
+            const badge = document.getElementById('auto-detect-badge');
+            if (latColName && lngColName) {
+                badge.innerText = '자동 감지됨';
+                badge.className = 'text-[11px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-medium';
+            } else {
+                badge.innerText = '선택 필요';
+                badge.className = 'text-[11px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium';
+            }
+        }
+
+        function populateColumnSelectors() {
+            const latSelect = document.getElementById('lat-col-select');
+            const lngSelect = document.getElementById('lng-col-select');
+            const configPanel = document.getElementById('column-config-panel');
+
+            configPanel.classList.remove('hidden');
+
+            latSelect.innerHTML = '<option value="">-- 선택 --</option>';
+            lngSelect.innerHTML = '<option value="">-- 선택 --</option>';
+
+            columnHeaders.forEach(col => {
+                const opt1 = document.createElement('option');
+                opt1.value = col;
+                opt1.textContent = col;
+                if (col === latColName) opt1.selected = true;
+                latSelect.appendChild(opt1);
+
+                const opt2 = document.createElement('option');
+                opt2.value = col;
+                opt2.textContent = col;
+                if (col === lngColName) opt2.selected = true;
+                lngSelect.appendChild(opt2);
+            });
+        }
+
+        function processParsedData() {
+            validDataPoints = [];
+            let invalidCount = 0;
+
+            if (!latColName || !lngColName) {
+                showToast('위도 및 경도 칼럼을 선택해 주세요.', 'info');
+                updateStats(parsedRows.length, 0, parsedRows.length);
+                renderDataList([]);
+                clearMapMarkers();
+                return;
+            }
+
+            parsedRows.forEach((row, idx) => {
+                const rawLat = row[latColName];
+                const rawLng = row[lngColName];
+
+                const lat = parseFloat(String(rawLat).replace(/[^0-9.-]/g, ''));
+                const lng = parseFloat(String(rawLng).replace(/[^0-9.-]/g, ''));
+
+                // Validate coordinates (Latitude: -90 to 90, Longitude: -180 to 180)
+                if (!isNaN(lat) && !isNaN(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180 && lat !== 0 && lng !== 0) {
+                    validDataPoints.push({
+                        originalIndex: idx,
+                        lat: lat,
+                        lng: lng,
+                        data: row
+                    });
+                } else {
+                    invalidCount++;
+                }
+            });
+
+            updateStats(parsedRows.length, validDataPoints.length, invalidCount);
+            renderDataList(validDataPoints);
+            
+            const useCluster = document.getElementById('cluster-toggle').checked;
+            renderMarkersOnMap(useCluster);
+        }
+
+        function updateStats(total, mapped, invalid) {
+            document.getElementById('stat-total').innerText = total.toLocaleString();
+            document.getElementById('stat-mapped').innerText = mapped.toLocaleString();
+            document.getElementById('stat-invalid').innerText = invalid.toLocaleString();
+        }
+
+        function clearMapMarkers() {
+            clusterGroup.clearLayers();
+            markersGroup.clearLayers();
+            mapMarkersMap.clear();
+        }
+
+        function renderMarkersOnMap(useCluster = true) {
+            clearMapMarkers();
+
+            if (validDataPoints.length === 0) return;
+
+            const bounds = L.latLngBounds();
+
+            validDataPoints.forEach((point, i) => {
+                const marker = L.marker([point.lat, point.lng], {
+                    title: getRowDisplayName(point.data)
+                });
+
+                // Create sleek popup HTML
+                const popupContent = createPopupHTML(point.data, point.lat, point.lng);
+                marker.bindPopup(popupContent, { maxWidth: 320, className: 'custom-leaflet-popup' });
+
+                marker.on('click', () => {
+                    highlightListItem(point.originalIndex);
+                });
+
+                mapMarkersMap.set(point.originalIndex, marker);
+
+                if (useCluster) {
+                    clusterGroup.addLayer(marker);
+                } else {
+                    markersGroup.addLayer(marker);
+                }
+
+                bounds.extend([point.lat, point.lng]);
+            });
+
+            if (!useCluster) {
+                map.addLayer(markersGroup);
+            }
+
+            // Fit map view to markers bounds
+            if (validDataPoints.length > 0) {
+                map.fitBounds(bounds, { padding: [40, 40], maxZoom: 16 });
+            }
+        }
+
+        function getRowDisplayName(row) {
+            // Find key identifier columns like 발전소명, 사업자명, 명칭, 이름, 주소
+            const priorityKeys = ['발전소명', '사업자명', '상호', '명칭', '이름', '시설명', '주소', '소재지'];
+            for (const key of priorityKeys) {
+                if (row[key]) return row[key];
+            }
+            // Fallback to first non-empty column value
+            for (const key in row) {
+                if (row[key] && key !== latColName && key !== lngColName) return row[key];
+            }
+            return '위치 데이터';
+        }
+
+        function createPopupHTML(row, lat, lng) {
+            let title = getRowDisplayName(row);
+            let rowsHtml = '';
+
+            for (const [key, val] of Object.entries(row)) {
+                if (val !== null && val !== undefined && val !== '') {
+                    const isCoord = (key === latColName || key === lngColName);
+                    rowsHtml += `
+                        <tr class="${isCoord ? 'bg-blue-50/70 font-semibold' : 'border-b border-slate-100'} text-xs">
+                            <td class="py-1 px-2 text-slate-500 font-medium whitespace-nowrap">${escapeHtml(key)}</td>
+                            <td class="py-1 px-2 text-slate-800 break-all">${escapeHtml(String(val))}</td>
+                        </tr>
+                    `;
+                }
+            }
+
+            return `
+                <div class="p-1 font-sans">
+                    <div class="border-b border-slate-200 pb-2 mb-2 flex items-center justify-between">
+                        <h3 class="font-bold text-sm text-slate-900 truncate pr-2">${escapeHtml(title)}</h3>
+                        <span class="text-[10px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded font-medium shrink-0">
+                            <i class="fa-solid fa-location-dot mr-1"></i>좌표 확인
+                        </span>
+                    </div>
+                    <div class="max-h-52 overflow-y-auto pr-1">
+                        <table class="w-full text-left border-collapse">
+                            <tbody>
+                                ${rowsHtml}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderDataList(points) {
+            const listEl = document.getElementById('data-list');
+            const emptyState = document.getElementById('empty-state');
+
+            if (points.length === 0) {
+                listEl.classList.add('hidden');
+                emptyState.classList.remove('hidden');
+                return;
+            }
+
+            emptyState.classList.add('hidden');
+            listEl.classList.remove('hidden');
+            listEl.innerHTML = '';
+
+            points.forEach(pt => {
+                const title = getRowDisplayName(pt.data);
+                
+                // Find sub details like address or capacity
+                const subDetail = pt.data['소재지'] || pt.data['주소'] || pt.data['사업자명'] || pt.data['설비용량(kW)'] ? 
+                                 (pt.data['소재지'] || pt.data['주소'] || `사업자: ${pt.data['사업자명'] || '-'} | 용량: ${pt.data['설비용량(kW)'] || '-'}kW`) : '';
+
+                const card = document.createElement('div');
+                card.id = `data-card-${pt.originalIndex}`;
+                card.className = `p-3 bg-white border border-slate-200 hover:border-blue-400 rounded-xl cursor-pointer transition-all hover:shadow-sm text-xs group`;
+                
+                card.innerHTML = `
+                    <div class="flex items-start justify-between">
+                        <div class="font-semibold text-slate-800 group-hover:text-blue-600 transition-colors truncate pr-2">
+                            ${escapeHtml(title)}
+                        </div>
+                        <span class="text-[10px] text-slate-400 font-mono shrink-0">#${pt.originalIndex + 1}</span>
+                    </div>
+                    ${subDetail ? `<div class="text-[11px] text-slate-500 mt-1 truncate">${escapeHtml(subDetail)}</div>` : ''}
+                    <div class="mt-2 flex items-center text-[10px] text-slate-400 space-x-3 font-mono">
+                        <span><i class="fa-solid fa-arrows-up-down text-slate-300 mr-1"></i>${pt.lat.toFixed(5)}</span>
+                        <span><i class="fa-solid fa-arrows-left-right text-slate-300 mr-1"></i>${pt.lng.toFixed(5)}</span>
+                    </div>
+                `;
+
+                card.addEventListener('click', () => {
+                    flyToLocation(pt.originalIndex, pt.lat, pt.lng);
+                });
+
+                listEl.appendChild(card);
+            });
+        }
+
+        function filterDataList(query) {
+            if (!query.trim()) {
+                renderDataList(validDataPoints);
+                return;
+            }
+
+            const q = query.toLowerCase();
+            const filtered = validDataPoints.filter(pt => {
+                return Object.values(pt.data).some(val => 
+                    val && String(val).toLowerCase().includes(q)
+                );
+            });
+
+            renderDataList(filtered);
+        }
+
+        function flyToLocation(index, lat, lng) {
+            highlightListItem(index);
+
+            map.flyTo([lat, lng], 16, {
+                animate: true,
+                duration: 1.2
+            });
+
+            const marker = mapMarkersMap.get(index);
+            if (marker) {
+                setTimeout(() => {
+                    if (document.getElementById('cluster-toggle').checked) {
+                        clusterGroup.zoomToShowLayer(marker, () => {
+                            marker.openPopup();
+                        });
+                    } else {
+                        marker.openPopup();
+                    }
+                }, 1200);
+            }
+        }
+
+        function highlightListItem(index) {
+            if (activeMarkerIndex !== null) {
+                const prev = document.getElementById(`data-card-${activeMarkerIndex}`);
+                if (prev) {
+                    prev.classList.remove('border-blue-600', 'bg-blue-50/40', 'ring-2', 'ring-blue-400/30');
+                    prev.classList.add('border-slate-200', 'bg-white');
+                }
+            }
+
+            activeMarkerIndex = index;
+            const current = document.getElementById(`data-card-${index}`);
+            if (current) {
+                current.classList.remove('border-slate-200', 'bg-white');
+                current.classList.add('border-blue-600', 'bg-blue-50/40', 'ring-2', 'ring-blue-400/30');
+                current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+        }
+
+        function loadSampleData() {
+            // Mock sample dataset based on "경상남도 거제시_태양광발전소사업현황"
+            const sampleCSV = `연번,사업자명,발전소명,소재지,설비용량(kW),허가일자,위도,경도
+1,거제태양광발전,거제1호 태양광발전소,경상남도 거제시 일운면 지세포리 123-4,99.8,2021-03-15,34.83214,128.68541
+2,해돋이에너지,해돋이 태양광,경상남도 거제시 장목면 관포리 567-8,198.5,2021-06-20,34.98541,128.65412
+3,남해햇빛발전,거제 동부 태양광,경상남도 거제시 동부면 산양리 89-1,49.5,2022-01-10,34.82105,128.58412
+4,거제솔라,사등솔라 1호,경상남도 거제시 사등면 성내리 345,99.0,2022-04-18,34.88541,128.53214
+5,바다햇빛에너지,거제둔덕 태양광발전소,경상남도 거제시 둔덕면 하둔리 678,250.0,2022-08-05,34.85412,128.51204
+6,거제에코파워,연초에코 태양광,경상남도 거제시 연초면 죽토리 901,99.9,2023-02-14,34.91204,128.63541
+7,거제시민햇빛발전,하청 태양광 1호기,경상남도 거제시 하청면 하청리 234,498.0,2023-05-22,34.95412,128.62105
+8,청정에너지,거미봉 태양광,경상남도 거제시 능포동 12-3,99.0,2023-09-30,34.87854,128.72105
+9,거제그린솔라,거제 상문 태양광,경상남도 거제시 상문동 456-7,150.0,2024-01-11,34.86541,128.61204
+10,남부솔라파워,거제 남부 태양광,경상남도 거제시 남부면 갈곶리 789,98.0,2024-04-03,34.75412,128.63214`;
+
+            document.getElementById('file-name-display').innerText = '경상남도 거제시_태양광발전소사업현황_예시.csv';
+            document.getElementById('encoding-select').value = 'UTF-8';
+
+            parseCSVText(sampleCSV);
+            showToast('거제시 태양광 예시 데이터가 로드되었습니다!', 'success');
+        }
+
+        function switchTile(tileKey, targetBtn) {
+            if (currentTileLayer) {
+                map.removeLayer(currentTileLayer);
+            }
+            currentTileLayer = tiles[tileKey].addTo(map);
+
+            const buttons = [document.getElementById('tile-carto'), document.getElementById('tile-esri'), document.getElementById('tile-dark')];
+            buttons.forEach(btn => {
+                btn.className = 'px-3 py-1.5 rounded font-medium text-slate-600 hover:bg-slate-100 transition-colors';
+            });
+
+            targetBtn.className = 'px-3 py-1.5 rounded font-medium bg-blue-50 text-blue-600 transition-colors';
+        }
+
+        function resetAll() {
+            parsedRows = [];
+            validDataPoints = [];
+            columnHeaders = [];
+            latColName = '';
+            lngColName = '';
+            activeMarkerIndex = null;
+
+            document.getElementById('csv-file-input').value = '';
+            document.getElementById('file-name-display').innerText = '';
+            document.getElementById('search-input').value = '';
+            document.getElementById('column-config-panel').classList.add('hidden');
+
+            updateStats(0, 0, 0);
+            renderDataList([]);
+            clearMapMarkers();
+
+            map.setView([36.5, 127.8], 7);
+            showToast('초기화되었습니다.', 'info');
+        }
+
+        function showToast(message, type = 'info') {
+            const toast = document.getElementById('toast');
+            const toastMsg = document.getElementById('toast-msg');
+            const toastIcon = document.getElementById('toast-icon');
+
+            toastMsg.innerText = message;
+
+            if (type === 'success') {
+                toastIcon.className = 'fa-solid fa-circle-check text-emerald-400';
+            } else if (type === 'error') {
+                toastIcon.className = 'fa-solid fa-triangle-exclamation text-rose-400';
+            } else {
+                toastIcon.className = 'fa-solid fa-circle-info text-blue-400';
+            }
+
+            toast.classList.remove('opacity-0', 'translate-y-4', 'pointer-events-none');
+            toast.classList.add('opacity-100', 'translate-y-0');
+
+            setTimeout(() => {
+                toast.classList.remove('opacity-100', 'translate-y-0');
+                toast.classList.add('opacity-0', 'translate-y-4', 'pointer-events-none');
+            }, 3000);
+        }
+
+        function escapeHtml(str) {
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+    </script>
+</body>
+</html>
